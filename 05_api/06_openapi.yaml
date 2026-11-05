@@ -1,0 +1,325 @@
+# OpenAPI 3.0 — платёжный сервис, кейс 1
+#
+# Как заполнять:
+#   1. Не меняй строки с пометкой "ОБРАЗЕЦ" — это образец.
+#   2. Строки с "TODO" замени на реальное описание.
+#   3. Все 4 метода должны быть описаны: create, confirm, get, cancel.
+#   4. У каждого метода — responses с кодами (201/200/402/404/409/422/504).
+#   5. В примерах используй реальные данные из payments.csv.
+#
+# Проверь после заполнения: файл должен открываться в
+# https://swagger.io без ошибок.
+
+openapi: 3.0.3
+
+info:
+  title: Med-Service Payment Service
+  version: "1.0.0"
+  description: Встраиваемый платёжный сервис для клиники. Шлюз эмулируется.
+
+servers:
+  - url: http://localhost:8081
+
+# ---------- ОБРАЗЕЦ: этот блок не трогать ----------
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 8, maxLength: 64}
+      description: UUID или стабильный ключ; хранится 24 ч
+
+  schemas:
+    PaymentCreate:
+      type: object
+      required: [order_id, recipient, purpose, amount, currency]
+      properties:
+        order_id: {type: string, minLength: 1, maxLength: 64,
+                   pattern: '^[A-Za-z0-9_\-]+$'}
+        recipient: {type: string, minLength: 1, maxLength: 64}
+        purpose: {type: string, minLength: 1, maxLength: 200}
+        amount: {type: number, format: double, minimum: 0.01, maximum: 1000000, multipleOf: 0.01}
+        currency: {type: string, enum: [RUB]}
+
+# ---------- TODO: опиши эти схемы сам ----------
+    PaymentCreated:
+      type: object
+      required: [payment_id, status, confirm_token, expires_in]
+      properties:
+        payment_id:
+          type: string
+          example: pay_0001
+        status:
+          type: string
+          enum: [CREATED]
+          example: CREATED
+        confirm_token:
+          type: string
+          example: tok_abc123xyz
+        expires_in:
+          type: integer
+          description: Время жизни токена подтверждения в секундах (TTL 10 минут)
+          example: 600
+
+    PaymentStatus:
+      type: object
+      required: [payment_id, status, error_code, amount, currency, history]
+      properties:
+        payment_id:
+          type: string
+          example: pay_0001
+        order_id:
+          type: string
+          example: ord_1001
+        recipient:
+          type: string
+          example: clinic_medservice
+        purpose:
+          type: string
+          example: Приём терапевта
+        amount:
+          type: number
+          example: 2500.00
+        currency:
+          type: string
+          enum: [RUB]
+          example: RUB
+        status:
+          type: string
+          enum: [CREATED, PENDING, SUCCESS, DECLINED, ERROR, CANCELED]
+          example: SUCCESS
+        error_code:
+          type: string
+          enum: [VALIDATION_ERROR, INVALID_FORMAT, AMOUNT_OUT_OF_RANGE, UNSUPPORTED_CURRENCY, RECIPIENT_NOT_FOUND, INVALID_PURPOSE, INVALID_AMOUNT_PRECISION, DUPLICATE_ORDER, IDEMPOTENCY_KEY_MISMATCH, REPLAY_DETECTED, GATEWAY_TIMEOUT, INSUFFICIENT_FUNDS, CARD_DECLINED]
+          example: INSUFFICIENT_FUNDS
+        idempotency_key:
+          type: string
+          example: idem_0001
+        created_at:
+          type: string
+          example: 2025-11-01T08:00:00Z
+        confirmed_at:
+          type: string
+          example: 2025-11-01T08:00:03Z
+        correlation_id:
+          type: string
+          example: corr_0001
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              status:
+                type: string
+                example: CREATED
+              changed_at:
+                type: string
+                example: 2025-11-01T08:00:00Z
+
+    PaymentConfirm:
+      type: object
+      required: [confirm_token]
+      properties:
+        confirm_token:
+          type: string
+          example: tok_abc123xyz
+        method:
+          type: string
+          enum: [card_token, sms_code, biometric_stub]
+          example: card_token
+
+    Error:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          example: Ошибка форматно-логического контроля входных полей
+        retryable:
+          type: boolean
+          example: false
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                example: amount
+              code:
+                type: string
+                example: AMOUNT_OUT_OF_RANGE
+
+# ---------- paths ----------
+paths:
+  # ---------- ОБРАЗЕЦ: health, не трогать ----------
+  /health:
+    get:
+      summary: Проверка живости
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {status: {type: string, example: UP}}
+
+  # ---------- TODO: создание платежа ----------
+  /api/v1/payments:
+    post:
+      tags: [payments]
+      summary: Создание платежного намерения и инициализация транзакции
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentCreate'
+            example:
+              order_id: ord_1001
+              recipient: clinic_medservice
+              purpose: Приём терапевта
+              amount: 2500.00
+              currency: RUB
+      responses:
+        '201':
+          description: Платёж создан, сгенерирован токен для подтверждения (CREATED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentCreated'
+        '200':
+          description: Повторный запрос. Извлечен и возвращен существующий результат (V-9)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentStatus'
+        '400':
+          description: Неверная структура запроса или PAN данные в назначении (V-4, V-6)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Ошибка авторизации учетной записи клиента
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Указанный получатель средств не найден в recipients.csv (V-5)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Дублирование ордера клиники (V-8)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Ошибка валидации параметров (Выход за границы сумм, неверная точность копеек)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Превышено ограничение частоты запросов Rate Limit
+
+  # ---------- TODO: подтверждение ----------
+  /api/v1/payments/{id}/confirm:
+    post:
+      tags: [payments]
+      summary: Подтверждение и проведение двухэтапного списания средств
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}, description: "payment_id транзакции"}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentConfirm'
+            example:
+              confirm_token: tok_abc123xyz
+              method: card_token
+      responses:
+        '200':
+          description: Платёж успешно проведен через эквайринг и закрыт в SUCCESS
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentStatus'
+        '402':
+          description: Платёж отклонен банком — недостаточно средств или карта заблокирована
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: Токен подтверждения недействителен или истек его 10-минутный TTL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Нарушение структуры запроса подтверждения
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Таймаут ответа удаленного банковского шлюза эквайринга после попыток ретраев
+
+  # ---------- TODO: статус ----------
+  /api/v1/payments/{id}:
+    get:
+      tags: [payments]
+      summary: Получение карточки транзакции и актуального статуса платежа
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}, description: "payment_id транзакции"}
+      responses:
+        '200':
+          description: Статус платежа успешно получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentStatus'
+        '404':
+          description: Платёж с указанным идентификатором отсутствует в базе данных
+
+  # ---------- TODO: отмена ----------
+  /api/v1/payments/{id}/cancel:
+    post:
+      tags: [payments]
+      summary: Аннулирование платежного намерения (только до момента подтверждения)
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}, description: "payment_id транзакции"}
+      responses:
+        '200':
+          description: Платёж успешно аннулирован и сохранен со статусом CANCELED (pay_0008)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentStatus'
+        '409':
+          description: Невозможно отменить транзакцию, так как она уже проведена или отклонена шлюзом
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'

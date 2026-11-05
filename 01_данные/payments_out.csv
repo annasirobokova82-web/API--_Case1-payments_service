@@ -1,0 +1,6 @@
+pay_demo_1001,ord_1001,clinic_medservice,Приём терапевта,2500.0,RUB,SUCCESS,
+pay_demo_1002,ord_1002,clinic_medservice,Приём терапевта,2500.0,RUB,DECLINED,INSUFFICIENT_FUNDS
+pay_demo_1003,ord_1003,clinic_medservice,Приём терапевта,2500.0,RUB,SUCCESS,
+pay_demo_1009,ord_1009,clinic_medservice,Приём терапевта,2500.0,RUB,SUCCESS,
+pay_demo_1019,ord_1019,clinic_medservice,Приём терапевта,2500.0,RUB,SUCCESS,
+pay_demo_1009,ord_1009,clinic_medservice,Приём терапевта,2500.0,RUB,SUCCESS,
